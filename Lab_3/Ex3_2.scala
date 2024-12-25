@@ -4,6 +4,7 @@ import akka.actor.typed.ActorRef
 import akka.actor.typed.ActorSystem
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
+import scala.util.Random
 
 //Актор, суммирующий значения
 object ActorServer:
@@ -22,28 +23,27 @@ object ActorServer:
     }
 
 object ActorClient:
-    def apply(server: ActorRef[ActorServer.AddMessage]):Behavior[ActorServer.Addable] = Behavior.setup{ context =>
+    def apply(server: ActorRef[ActorServer.AddMessage]):Behavior[ActorServer.Addable] = Behaviors.setup{ context =>
         def generationAndSending():Unit = {
             val a = Random.between(0,100)
             val b = Random.between(0,100)
             server ! ActorServer.AddMessage(a, b, context.self)
         }
         generationAndSending()
-        Behavior.receiveMessage{message => 
-            contex.log.info(s"Result $message") 
+        Behaviors.receiveMessage{message => 
+            context.log.info(s"Result $message") 
             generationAndSending()
-            Behavior.same 
+            Behaviors.same 
         }
     }
 
 //ActorSystem
 object AddingSystem:
     //Поведение при инициализации ActorSystem
-    def apply():Behavior[AddingActor.Addable] = Behaviors.setup{ (context)=>
+    def apply():Behavior[ActorServer.Addable] = Behaviors.setup{ (context)=>
         val server = context.spawn(ActorServer(), "server")     //Создание актора server 
         val client = context.spawn(ActorClient(server), "client")   //Создание актора client
         Behaviors.empty
     }
 @main def AddingMain():Unit =
     val system = ActorSystem(AddingSystem(),"system")
-

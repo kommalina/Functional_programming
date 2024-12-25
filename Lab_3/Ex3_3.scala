@@ -21,53 +21,55 @@ object ActorIntegral:
 
 // Актор, суммирующий результаты
 object ActorSum:
-    def apply(total: Int, finaly: ActorRef[Double]):Behavior[Double] = Behaviors.setup{ contex =>
-        def counting(count: Int, sum: Double):Behavior[Double] =  Behaviors.receiveMessage{ message =>
-            val newSum = sum + message
-            if (count > 1) then
-                counting(newSum, count-1)
-            else 
-                context.log.info(s"Final sum: $curSum")
-                finaly ! curSum
+    def apply(total: Int, replyTo: ActorRef[Double]):Behavior[Double] = Behaviors.setup{ context =>
+        def counting(sum: Double, count: Int):Behavior[Double] =  Behaviors.receiveMessage{ message =>
+            if (count > 0) then
+                counting(sum + message, count-1)
+            else {
+                replyTo ! sum + message
                 Behaviors.stopped
+            }         
+        }  
         counting(0.0, total)
     }
-}
 
 //ActorSystem
 object integralSystem:
-    case class Integrals(f: Double => Double, l: Double, r: Double, steps: Int, t: Int, replyTo: ActorRef[Double])
+    case class Integrals(f: Double => Double, l: Double, r: Double, steps: Int, tasks: Int,replyTo: ActorRef[Double])
     
     def apply():Behavior[Integrals]= Behaviors.setup{ context =>
-        val actors = Seq(context.spawn(ActorIntegral(), "Actor0"),
-                        context.spawn(ActorIntegral(), "Actor1"), 
-                        context.spawn(ActorIntegral(), "Actor2"),
-                        context.spawn(ActorIntegral(), "Actor3"))
-        val sum = context.spawn(ActorSum(4, context.self), "Sum")
-        Behaviors.receiveMessage { message =>
-            val stepSize = (message.r - message.l) / message.parts
-            (0 until message.parts).foreach { i =>
-            val left = message.l + i * stepSize
-            val right = left + stepSize
-            actors(i) ! ActorIntegral.Integral(message.f, left, right, message.steps / message.parts, sum)
-
+        val integralActors = (0 until 4).map(i => context.spawn(ActorIntegral(), s"integralActor$i")).toSeq
+        val numActors = integralActors.length
+        
+        Behaviors.receiveMessage {  
+            case Integrals (f, l, r, steps, tasks, replyTo) =>
+                val sumActor = context.spawn(ActorSum(tasks, replyTo), "SumActor")
+                val stepSize = (r - l)/tasks
+                
+                (0 until tasks).foreach { i =>
+                    val left = l + i * stepSize
+                    val right = left + stepSize
+                    integralActors(i % integralActors.length) ! ActorIntegral.Integral(f, left, right, steps/tasks, sumActor)
+                }
             Behaviors.same
         }
     }
-}
 
+//Логирование 
 object ResultLogger:
     def apply(): Behavior[Double] = Behaviors.receive { (context, result) =>
         context.log.info(s"Result: $result")
         Behaviors.same
     }
 
+//Функция
+def f(x: Double): Double = math.pow(x, 2) * (math.log(x) / math.log(10))
+
 @main def main():Unit = {
     val system = ActorSystem(integralSystem(), "integralSystem")
-    val log = ActorSystem(ResultLogger(), "resultLogger")
+    val resLog = ActorSystem(ResultLogger(), "resultLogger")
 
-    def f(x: Double): Double = math.pow(x, 2) * (math.log(x) / math.log(10))
-
-    system ! integralSystem.Integrals(f, 1.4, 3.0, 100, 4, log)
+    system ! integralSystem.Integrals(f, 1.0, 3.0, 100, 10, resLog)
 }
+
 
